@@ -1,16 +1,15 @@
 # 🪨 OGG Node — Docker Hub Setup
 
 Ogg make easy path.
-
 No build from source. No cave headache. No compile pain.
-
 Pull image. Run node. Cave connected.
 
 **This setup runs a full Ogg node with:**
 - RPC open on port `18545`
-- P2P peer connection on port `30666`
+- P2P peer connection on port `30303`
 - Persistent chain data — survives restarts
 - Automatic restart if server reboots
+- Bootnodes hardcoded — peers connect automatically
 
 ---
 
@@ -19,25 +18,30 @@ Pull image. Run node. Cave connected.
 | Requirement | Minimum |
 |---|---|
 | OS | Ubuntu 20.04 / 22.04 / 24.04 |
-| RAM | 8 GB |
-| CPU | 4 cores |
+| RAM | 4 GB |
+| CPU | 2 cores |
 | Disk | 100 GB SSD |
 | Docker | 20.x or higher |
+| Ports | 18545 (RPC), 30303 (P2P) |
 
 ---
 
 ## 1️⃣ Install Docker
 
-First — give server the tools it need.
+First — give server the tools it needs.
 
 ```bash
 sudo apt update
-sudo apt install -y docker.io docker-compose-plugin
+sudo apt install -y docker.io docker-compose
 sudo systemctl enable docker
 sudo systemctl start docker
 ```
 
-> Docker not installed? Node not run. Do this first.
+Verify Docker is running:
+
+```bash
+docker --version
+```
 
 ---
 
@@ -53,40 +57,46 @@ Image downloaded. Cave blueprint ready.
 
 ---
 
-## 3️⃣ Create Data Volume
+## 3️⃣ Start Node
 
-Ogg node needs a safe place to keep chain data.
-
-```bash
-docker volume create ogg-node-data
-```
-
-> This keeps blockchain data alive even if container is stopped or removed. Chain data survives. Volume is the rock.
-
----
-
-## 4️⃣ Start Ogg Full Node
-
-Node ready. Time to wake it.
+### Full Node / Exchange (No Mining)
 
 ```bash
 docker run -d \
   --name ogg-node \
   --restart unless-stopped \
   -p 18545:18545 \
-  -p 30666:30666/tcp \
-  -p 30666:30666/udp \
-  -v ogg-node-data:/data \
+  -p 30303:30303/tcp \
+  -p 30303:30303/udp \
+  -v $(pwd)/egem-data:/root/egem-data \
   oggcoin/ogg-node:latest
 ```
 
-Ogg node now starts in background. Cave open. Peers incoming.
+Node starts in background. Chain data saved to `egem-data` folder. Cave open.
+
+### Solo Miner
+
+Add your wallet address with `-e WALLET=`:
+
+```bash
+docker run -d \
+  --name ogg-node \
+  --restart unless-stopped \
+  -e WALLET=0xYourWalletAddress \
+  -p 18545:18545 \
+  -p 30303:30303/tcp \
+  -p 30303:30303/udp \
+  -v $(pwd)/egem-data:/root/egem-data \
+  oggcoin/ogg-node:latest
+```
+
+Replace `0xYourWalletAddress` with your OGG wallet address. Mining rewards go directly to that wallet.
 
 ---
 
-## 5️⃣ Check Logs
+## 4️⃣ Check Logs
 
-Watch node startup logs.
+Watch node startup logs:
 
 ```bash
 docker logs -f ogg-node
@@ -95,7 +105,8 @@ docker logs -f ogg-node
 Healthy startup looks like this:
 
 ```
-genesis initialized
+Initializing chain data...
+ChainID: 70088
 RPC opened on 18545
 peers connected
 blocks syncing
@@ -105,75 +116,87 @@ blocks syncing
 
 ---
 
-## 6️⃣ Check RPC
+## 5️⃣ Check RPC
 
-Confirm RPC is alive and responding.
+Confirm RPC is alive and responding:
 
 ```bash
-curl -s http://127.0.0.1:18545 \
--H "Content-Type: application/json" \
---data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+curl -s -X POST http://127.0.0.1:18545 \
+  -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 ```
 
 Expected response:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":"0xf8"}
+{"jsonrpc":"2.0","id":1,"result":"0x81"}
 ```
 
-> JSON response means RPC is working. Node is ready.
+JSON response means RPC is working. Node is ready.
 
 ---
 
-## 7️⃣ Check Peers and Sync
+## 6️⃣ Check Peers and Sync
 
-Open node console:
+Check connected peers:
 
 ```bash
-docker exec -it ogg-node /app/ogg-node attach http://127.0.0.1:18545
+curl -s -X POST http://127.0.0.1:18545 \
+  -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}'
 ```
 
-Run inside console:
+Check sync status:
 
-```javascript
-net.peerCount
-eth.blockNumber
-eth.syncing
+```bash
+curl -s -X POST http://127.0.0.1:18545 \
+  -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}'
+```
+
+Check current block:
+
+```bash
+curl -s -X POST http://127.0.0.1:18545 \
+  -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 ```
 
 **Healthy node:**
 
 | Check | Expected |
 |---|---|
-| `net.peerCount` | `> 0` — peers found |
-| `eth.blockNumber` | `> 0` — blocks arriving |
-| `eth.syncing` | `false` — fully synced |
+| `net_peerCount` | `0x2` or higher — peers found |
+| `eth_blockNumber` | Increasing — blocks arriving |
+| `eth_syncing` | `false` — fully synced |
 
-> If `eth.syncing` still shows progress — node is catching up. Let it finish.
-
-Exit console:
-
-```javascript
-exit
-```
+> If `eth_syncing` still shows progress — node is catching up. Let it finish.
 
 ---
 
-## 8️⃣ Stop Node
+## 7️⃣ Stop / Start / Restart
 
 Stop node:
-
 ```bash
 docker stop ogg-node
 ```
 
-Remove container:
-
+Start node:
 ```bash
-docker rm ogg-node
+docker start ogg-node
 ```
 
-> Chain data stays safe in Docker volume `ogg-node-data`. Container gone — data not gone. Pull and run again anytime.
+Restart node:
+```bash
+docker restart ogg-node
+```
+
+Remove container (chain data stays safe):
+```bash
+docker stop ogg-node && docker rm ogg-node
+```
+
+> Chain data stays safe in `egem-data` folder. Container gone — data not gone. Run again anytime.
 
 ---
 
@@ -181,11 +204,12 @@ docker rm ogg-node
 
 | Action | Command |
 |---|---|
-| Restart node | `docker restart ogg-node` |
 | View logs | `docker logs -f ogg-node` |
 | Running containers | `docker ps` |
-| Check data volume | `docker volume ls` |
-| Check RPC | `curl http://127.0.0.1:18545` |
+| Check RPC | `curl -s -X POST http://127.0.0.1:18545 -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'` |
+| Stop node | `docker stop ogg-node` |
+| Restart node | `docker restart ogg-node` |
+| Remove container | `docker stop ogg-node && docker rm ogg-node` |
 
 ---
 
@@ -194,7 +218,6 @@ docker rm ogg-node
 ```
 Docker installed        ✓
 Image pulled            ✓
-Volume created          ✓
 Node running            ✓
 RPC alive               ✓
 Peers connected         ✓
